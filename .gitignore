@@ -1,0 +1,16 @@
+# dependencies
+node_modules
+
+# build output
+dist
+*.tsbuildinfo
+
+# The 183 MB camera master. GitHub rejects any file over 100 MB, so it cannot
+# live here. The two encodes the site actually loads are committed under
+# public/video/, and README.md carries the ffmpeg command to rebuild them from
+# this file. Keep it in your own storage, or add it with Git LFS.
+/video.mp4
+
+# local
+*.local
+.DS_Store

@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --edge: clamp(1.25rem, 4.2vw, 4.5rem);
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    background: #06080b;
+    /* `clip`, not `hidden`: `hidden` would turn the body into a scroll
+       container, which breaks the sticky film stage and position: fixed. */
+    overflow-x: clip;
+  }
+
+  body {
+    @apply bg-ink text-bone font-sans antialiased;
+    overflow-x: clip;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  body[data-locked='true'] {
+    overflow: hidden;
+  }
+
+  ::selection {
+    background: #c4a264;
+    color: #06080b;
+  }
+
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+@layer components {
+  /* the small tracked-out caps used for every chapter marker and label */
+  .eyebrow {
+    @apply text-[0.62rem] uppercase tracking-eyebrow font-medium;
+    font-feature-settings: 'ss01';
+  }
+
+  /* the display setting: tight, optical, architectural */
+  .display {
+    @apply font-sans font-medium tracking-tightest leading-[0.92];
+    font-variation-settings: 'wght' 500;
+  }
+
+  .accent {
+    @apply font-display italic font-normal tracking-[-0.01em];
+  }
+
+  /* one hairline rule, used everywhere instead of boxes and cards */
+  .rule {
+    @apply bg-bone/15;
+  }
+
+  .layer {
+    @apply pointer-events-none absolute inset-0;
+    will-change: opacity;
+    /* a soft shadow rather than a heavier scrim: keeps white type readable
+       over the bright roof and sky without dimming the footage */
+    text-shadow: 0 1px 30px rgba(6, 8, 11, 0.7), 0 1px 3px rgba(6, 8, 11, 0.35);
+  }
+
+  .layer-inner {
+    @apply relative h-full w-full;
+    padding-inline: var(--edge);
+  }
+
+  /* cinematic side margins on wide screens */
+  @media (min-width: 1024px) {
+    .layer-inner {
+      padding-inline: calc(var(--edge) + 2rem);
+    }
+  }
+
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    background-size: 0% 1px;
+    transition: background-size 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .link-underline:hover {
+    background-size: 100% 1px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .gpu {
+    transform: translateZ(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  /* the film still scrubs — everything decorative stops */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
