@@ -15,8 +15,13 @@ gsap.registerPlugin(ScrollTrigger)
  * This is the film's playback speed: the whole 30s runs across
  * TRACK - 100svh of scrolling, so a longer track means fewer video frames per
  * wheel notch and a visibly smoother scrub.
+ *
+ * At 1150svh on an 810px viewport that is ~4.7px of scroll per video frame, or
+ * about 21 frames per wheel notch. Useful bounds: below ~2px/frame the film
+ * races ahead of the scroll, and above ~6px/frame it starts to visibly step
+ * between notches.
  */
-const TRACK = 'h-[800svh]'
+const TRACK = 'h-[1150svh]'
 
 /**
  * Cap for the fallback progress source. The video element's buffered range is

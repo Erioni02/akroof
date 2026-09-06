@@ -182,10 +182,13 @@ controls and no poster.
 ### Scroll pacing
 
 `TRACK` in `FilmStage.tsx` is the film's playback speed — the whole 30s runs
-across `TRACK - 100svh` of scrolling. At the current `800svh` and an 810px
-viewport that is 5673px of scroll for 1797 frames: about 3.2px per frame, or 32
-frames (half a second of film) per wheel notch. Raise it to slow the film down
-and make the scrub smoother; lower it to tighten the page.
+across `TRACK - 100svh` of scrolling. At the current `1150svh` and an 810px
+viewport that is 8510px of scroll for 1797 frames: about 4.7px per frame, or 21
+frames (a third of a second of film) per wheel notch, and 85 notches end to end.
+
+Useful bounds: below ~2px per frame the film races ahead of the scroll; above
+~6px it visibly steps between notches. Raise `TRACK` to slow the film down,
+lower it to tighten the page.
 
 ### Loading
 
