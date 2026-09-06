@@ -76,6 +76,18 @@
     padding-inline: var(--edge);
   }
 
+  /* A landscape phone is only ~390px tall. Give the chapters their air back so
+     the type does not overflow upward under the navigation. */
+  .layer-pad {
+    padding-block: max(6.5rem, 14svh);
+  }
+
+  @media (max-height: 660px) {
+    .layer-pad {
+      padding-block: 3.5rem;
+    }
+  }
+
   /* cinematic side margins on wide screens */
   @media (min-width: 1024px) {
     .layer-inner {

@@ -9,9 +9,17 @@ const LINE_STAGGER = 60
 const CURTAIN_DELAY = 260
 const CURTAIN_OUT = 900
 
+/** never hold the curtain longer than this waiting for the bar to catch up */
+const SETTLE_CAP = 900
+
 /**
- * The title card. It holds the page until the film has enough data to be
- * scrubbed, then lifts like a shutter.
+ * The title card. It holds the page until the film can be scrubbed, then lifts
+ * like a shutter.
+ *
+ * The bar reports real bytes (see FilmStage), and it always finishes: when the
+ * film becomes ready the bar runs to 100 and only then does the curtain move.
+ * An earlier version lifted the moment the video reported "playable", which
+ * left the bar stranded around 15% and made the whole thing look fake.
  *
  * The exit is plain CSS rather than GSAP on purpose: this component is the one
  * thing on the page that must never be able to get stuck.
@@ -24,22 +32,53 @@ export default function Loader({
   onExit: () => void
 }) {
   const barRef = useRef<HTMLSpanElement>(null)
+  const pctRef = useRef<HTMLSpanElement>(null)
   const [leaving, setLeaving] = useState(false)
+
+  const doneRef = useRef(false)
+  doneRef.current = done
+  const startedExit = useRef(false)
 
   // The bar reads straight from the store, so this component renders twice in
   // its whole life — once on mount, once when it starts leaving.
   useLayoutEffect(() => {
     let shown = 0
     let target = 0
+    let readyAt = 0
+    let lastPrinted = -1
+
     const unsubscribe = film.subscribeLoad((p) => {
       target = p
     })
+
     const tick = () => {
-      shown += (target - shown) * 0.07
+      // ease harder as it approaches, so the last stretch does not crawl
+      shown += (target - shown) * (doneRef.current ? 0.16 : 0.07)
+      if (target - shown < 0.4) shown = target
+
       if (barRef.current) {
         barRef.current.style.transform = 'scaleX(' + (shown / 100).toFixed(4) + ')'
       }
+      if (pctRef.current) {
+        const n = Math.min(100, Math.floor(shown))
+        if (n !== lastPrinted) {
+          lastPrinted = n
+          pctRef.current.textContent = String(n)
+        }
+      }
+
+      // hand over only once the bar has actually finished — or given up waiting
+      if (doneRef.current && !startedExit.current) {
+        if (!readyAt) readyAt = performance.now()
+        const settled = shown >= 99.4
+        const waited = performance.now() - readyAt > SETTLE_CAP
+        if (settled || waited) {
+          startedExit.current = true
+          setLeaving(true)
+        }
+      }
     }
+
     gsap.ticker.add(tick)
     return () => {
       unsubscribe()
@@ -48,23 +87,10 @@ export default function Loader({
   }, [])
 
   useEffect(() => {
-    if (!done) return
-    const start = window.setTimeout(() => setLeaving(true), 320)
-    const finish = window.setTimeout(
-      onExit,
-      320 + CURTAIN_DELAY + CURTAIN_OUT + 60,
-    )
-    return () => {
-      clearTimeout(start)
-      clearTimeout(finish)
-    }
-  }, [done, onExit])
-
-  const lines = [
-    <p key="place" className="eyebrow text-bone/45">
-      {site.city}, {site.state}
-    </p>,
-  ]
+    if (!leaving) return
+    const finish = window.setTimeout(onExit, CURTAIN_DELAY + CURTAIN_OUT + 60)
+    return () => clearTimeout(finish)
+  }, [leaving, onExit])
 
   return (
     <div
@@ -75,7 +101,9 @@ export default function Loader({
       }}
     >
       <Line leaving={leaving} i={0}>
-        {lines[0]}
+        <p className="eyebrow text-bone/45">
+          {site.city}, {site.state}
+        </p>
       </Line>
 
       <div>
@@ -85,7 +113,7 @@ export default function Loader({
           </h1>
         </Line>
 
-        <div className="mt-8 flex items-end justify-between gap-8">
+        <div className="mt-8 flex items-end justify-between gap-6 sm:gap-10">
           <Line leaving={leaving} i={2} className="min-w-0 flex-1">
             <span className="block h-px w-full bg-bone/15">
               <span
@@ -96,8 +124,12 @@ export default function Loader({
             </span>
           </Line>
           <Line leaving={leaving} i={3} className="shrink-0">
-            <span className="eyebrow block whitespace-nowrap text-bone/45">
-              Loading the film
+            <span className="eyebrow flex items-baseline gap-3 whitespace-nowrap text-bone/45">
+              <span className="hidden xs:inline">Loading the film</span>
+              <span className="inline-flex justify-end tabular-nums text-bone/85 [min-width:2.6ch]">
+                <span ref={pctRef}>0</span>
+              </span>
+              <span className="text-bone/45">%</span>
             </span>
           </Line>
         </div>

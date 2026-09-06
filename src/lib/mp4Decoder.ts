@@ -32,7 +32,27 @@ type Sample = {
   chunk: EncodedVideoChunk
 }
 
-export type LoadProgress = (loaded: number, total: number) => void
+/**
+ * Overall load progress, 0..1, across every phase that has to finish before
+ * the film can be scrubbed. The phases are weighted below; reporting only the
+ * download would leave the bar parked while the sample table is parsed and the
+ * decoder is chosen, which reads as a hang.
+ */
+export type LoadProgress = (fraction: number) => void
+
+/** byte-level progress of the file download itself */
+type ByteProgress = (loaded: number, total: number) => void
+
+const PHASE_DOWNLOAD = 0.9
+const PHASE_PARSE = 0.96
+const PHASE_PICK = 0.99
+
+/**
+ * Frames per decoder trial. Enough to expose a decoder that stalls (the wedge
+ * this guards against appears above five chunks) without making the benchmark
+ * itself a noticeable part of the load.
+ */
+const BENCH_FRAMES = 14
 
 /** decoded frames held at once (~2.2MB each at 1600x900, ~0.9MB on mobile) */
 const MAX_FRAMES = 44
@@ -130,9 +150,14 @@ export class FrameBank {
     if (!FrameBank.supported()) throw new Error('WebCodecs unavailable')
     if (!FrameBank.worthwhile()) throw new Error('frame bank not worthwhile here')
 
+    const report = onProgress ?? (() => {})
+
     const mod: any = await import('mp4box')
     const MP4Box: any = mod.default ?? mod
-    const buffer = await fetchBuffer(url, onProgress)
+    const buffer = await fetchBuffer(url, (loaded, total) => {
+      if (total > 0) report((loaded / total) * PHASE_DOWNLOAD)
+    })
+    report(PHASE_DOWNLOAD)
 
     const bank = await new Promise<FrameBank>((resolve, reject) => {
       const file = MP4Box.createFile()
@@ -176,6 +201,12 @@ export class FrameBank {
               })
             }
 
+            report(
+              PHASE_DOWNLOAD +
+                (PHASE_PARSE - PHASE_DOWNLOAD) *
+                  Math.min(1, collected.length / Math.max(1, track.nb_samples)),
+            )
+
             if (collected.length >= track.nb_samples && !settled) {
               settled = true
               clearTimeout(timer)
@@ -199,7 +230,8 @@ export class FrameBank {
       file.flush()
     })
 
-    await bank.prime()
+    await bank.prime(report)
+    report(1)
     return bank
   }
 
@@ -222,7 +254,7 @@ export class FrameBank {
    * strands somebody, so we time a short run through each and keep the winner.
    * It costs a few hundred milliseconds, behind the loading screen.
    */
-  private async chooseConfig(): Promise<void> {
+  private async chooseConfig(report: LoadProgress): Promise<void> {
     const candidates: VideoDecoderConfig[] = [
       { ...this.config, hardwareAcceleration: 'prefer-hardware' },
       { ...this.config, hardwareAcceleration: 'prefer-software' },
@@ -231,12 +263,16 @@ export class FrameBank {
     let best: VideoDecoderConfig | null = null
     let bestMs = Infinity
 
-    for (const config of candidates) {
-      const ms = await timeDecode(config, this.samples, 24)
+    for (let i = 0; i < candidates.length; i++) {
+      const ms = await timeDecode(candidates[i], this.samples, BENCH_FRAMES)
       if (ms < bestMs) {
         bestMs = ms
-        best = config
+        best = candidates[i]
       }
+      report(
+        PHASE_PARSE +
+          ((PHASE_PICK - PHASE_PARSE) * (i + 1)) / candidates.length,
+      )
     }
 
     if (best && bestMs < Infinity) this.config = best
@@ -244,8 +280,8 @@ export class FrameBank {
   }
 
   /** Decode the opening run now, so a broken config fails here not mid-scroll. */
-  private async prime(): Promise<void> {
-    await this.chooseConfig()
+  private async prime(report: LoadProgress): Promise<void> {
+    await this.chooseConfig(report)
     this.target = 0
     for (let g = 0; g < Math.min(6, this.syncList.length); g++) this.decodeRun(g)
 
@@ -538,7 +574,8 @@ async function timeDecode(
         await decoder.flush()
         return performance.now() - t0
       })(),
-      new Promise<number>((r) => setTimeout(() => r(Infinity), 2500)),
+      // a decoder that cannot manage this is not the one we want anyway
+      new Promise<number>((r) => setTimeout(() => r(Infinity), 1500)),
     ])
 
     // a decoder that returned nothing is no use however fast it claims to be
@@ -588,7 +625,7 @@ function avccDescription(MP4Box: any, file: any, trackId: number): Uint8Array {
 /** One download per URL, no matter how many times the stage remounts. */
 const inflight = new Map<string, Promise<ArrayBuffer>>()
 
-function fetchBuffer(url: string, onProgress?: LoadProgress) {
+function fetchBuffer(url: string, onProgress?: ByteProgress) {
   let p = inflight.get(url)
   if (!p) {
     p = download(url, onProgress)
@@ -597,7 +634,7 @@ function fetchBuffer(url: string, onProgress?: LoadProgress) {
   return p
 }
 
-async function download(url: string, onProgress?: LoadProgress) {
+async function download(url: string, onProgress?: ByteProgress) {
   // The <video> element is already pulling this file. Prefer the HTTP cache so
   // the frame bank costs no second download on a properly cached host.
   const res = await fetch(url, { cache: 'force-cache' })

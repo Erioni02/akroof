@@ -121,6 +121,36 @@ leaves the `<video>` path running and the site behaves the same.
 The video is never played. It is muted, `playsInline`, `preload="auto"`, has no
 controls and no poster.
 
+### Scroll pacing
+
+`TRACK` in `FilmStage.tsx` is the film's playback speed — the whole 30s runs
+across `TRACK - 100svh` of scrolling. At the current `800svh` and an 810px
+viewport that is 5673px of scroll for 1797 frames: about 3.2px per frame, or 32
+frames (half a second of film) per wheel notch. Raise it to slow the film down
+and make the scrub smoother; lower it to tighten the page.
+
+### Loading
+
+The bar reports the download that actually has to finish, in bytes, and it
+always completes before the curtain lifts. Both halves of that matter: an
+earlier version showed the video element's *buffered seconds* and lifted at
+`readyState >= 3`, which arrives after a fraction of the file — so the bar
+stranded around 15% and the whole thing looked fake.
+
+Progress is weighted across the real phases, because reporting only the
+download parked the bar at 92% for over a second while the rest happened:
+
+| phase                              | share    |
+| ---------------------------------- | -------- |
+| file download (bytes)              | 0 – 90%  |
+| mp4box sample-table parse          | 90 – 96% |
+| decoder benchmark (see above)      | 96 – 99% |
+| first decode                       | 99 – 100%|
+
+If the frame bank cannot be built, the loader falls back to revealing as soon
+as the video can be scrubbed, and an 18s cap means a stalled network can never
+hold the page hostage.
+
 ### Compositing
 
 A CSS `filter` on a full-screen element is a full-screen GPU pass on every
@@ -188,5 +218,6 @@ The Google Maps embed in chapter 09 is deliberately constrained:
 
 All copy, credentials and links live in `src/data/site.ts`. Nothing is invented:
 no reviews, no statistics, no certifications beyond the ones supplied.
-#   a k r o o f  
+#   a k r o o f 
+ 
  

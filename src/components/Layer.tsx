@@ -131,7 +131,7 @@ export function Layer({
         <div className={'layer-inner flex ' + placement[place]}>
           <div
             className={
-              'w-full py-[max(6.5rem,14svh)] ' + width + ' ' + className
+              'layer-pad w-full ' + width + ' ' + className
             }
           >
             {children}

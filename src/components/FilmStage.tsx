@@ -9,6 +9,22 @@ import { clamp, damp, easeInOutQuad, prefersReducedMotion, range } from '@/lib/m
 
 gsap.registerPlugin(ScrollTrigger)
 
+/**
+ * Length of the scroll track.
+ *
+ * This is the film's playback speed: the whole 30s runs across
+ * TRACK - 100svh of scrolling, so a longer track means fewer video frames per
+ * wheel notch and a visibly smoother scrub.
+ */
+const TRACK = 'h-[800svh]'
+
+/**
+ * Cap for the fallback progress source. The video element's buffered range is
+ * only used when the frame bank is not running; it must not reach 100 on its
+ * own, because "playable" arrives long before the film is actually ready.
+ */
+const DOWNLOAD_SHARE = 88
+
 const DESKTOP_SRC = '/video/ak-film.mp4'
 const MOBILE_SRC = '/video/ak-film-mobile.mp4'
 
@@ -50,10 +66,19 @@ export default function FilmStage({ children, onReady }: Props) {
 
     /* ------------------------------------------------------------ ready gate */
 
+    // The loading bar reports the download that actually has to finish, in
+    // bytes — not the video element's buffered seconds, which reach "playable"
+    // after a fraction of the file and made the bar lift at around 15%.
+    //
+    // Byte progress fills 0-92%. The last 8% belongs to parsing the sample
+    // table and decoding the first frames, which is real work with no progress
+    // of its own; reserving a slice for it is honest and stops the bar sitting
+    // at 100% while the film is still not ready.
     let revealed = false
     const reveal = () => {
       if (revealed) return
       revealed = true
+      film.setLoad(100)
       onReady()
     }
 
@@ -62,16 +87,22 @@ export default function FilmStage({ children, onReady }: Props) {
       const buffered = video.buffered.length
         ? video.buffered.end(video.buffered.length - 1) / video.duration
         : 0
-      film.setLoad(clamp(buffered) * 100)
-      if (video.readyState >= 3) reveal()
+      film.setLoad(clamp(buffered) * DOWNLOAD_SHARE)
     }
 
     video.addEventListener('progress', onProgress)
     video.addEventListener('loadeddata', onProgress)
-    video.addEventListener('canplay', reveal)
-    video.addEventListener('canplaythrough', reveal)
+
+    // If the frame bank cannot be built we still have a usable site, so fall
+    // back to revealing as soon as the video can be scrubbed.
+    let bankFailed = false
+    const revealIfNoBank = () => {
+      if (bankFailed) reveal()
+    }
+    video.addEventListener('canplay', revealIfNoBank)
+
     // never let a stalled network hold the site hostage
-    const safety = window.setTimeout(reveal, 9000)
+    const safety = window.setTimeout(reveal, 18000)
 
     /* ------------------------------------------------------- canvas sizing */
 
@@ -86,7 +117,7 @@ export default function FilmStage({ children, onReady }: Props) {
 
     // Progressive enhancement: the <video> scrubs the moment it has data, and
     // the decoded frame bank quietly takes over once it has finished parsing.
-    FrameBank.load(src)
+    FrameBank.load(src, (fraction) => film.setLoad(fraction * 100))
       .then((b) => {
         if (cancelled) {
           b.dispose()
@@ -98,9 +129,12 @@ export default function FilmStage({ children, onReady }: Props) {
         b.invalidate()
         forceRedraw = true
         setUsingCanvas(true)
+        reveal()
       })
       .catch(() => {
-        /* stay on the <video> path — identical behaviour, coarser frames */
+        // stay on the <video> path — identical behaviour, coarser frames
+        bankFailed = true
+        if (video.readyState >= 3) reveal()
       })
 
     const renderAt = (time: number) => {
@@ -254,8 +288,7 @@ export default function FilmStage({ children, onReady }: Props) {
       window.removeEventListener('orientationchange', onResize)
       video.removeEventListener('progress', onProgress)
       video.removeEventListener('loadeddata', onProgress)
-      video.removeEventListener('canplay', reveal)
-      video.removeEventListener('canplaythrough', reveal)
+      video.removeEventListener('canplay', revealIfNoBank)
       video.removeEventListener('seeked', onSeeked)
       bank?.dispose()
       film.track = null
@@ -264,7 +297,7 @@ export default function FilmStage({ children, onReady }: Props) {
   }, [])
 
   return (
-    <div ref={trackRef} className="relative h-[520svh] w-full">
+    <div ref={trackRef} className={'relative w-full ' + TRACK}>
       <div
         ref={stageRef}
         className="sticky top-0 h-[100svh] w-full overflow-hidden bg-ink"

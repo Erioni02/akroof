@@ -9,7 +9,7 @@ import { Layer, Marker, Reveal } from '@/components/Layer'
 /* ------------------------------------------------------------------ atoms */
 
 const H = ({ children }: { children: React.ReactNode }) => (
-  <h2 className="display text-balance text-[clamp(1.85rem,4.4vw,3.5rem)]">
+  <h2 className="display text-balance text-[clamp(1.6rem,min(4.4vw,7.4svh),3.5rem)]">
     {children}
   </h2>
 )
@@ -71,7 +71,7 @@ function ChHouse() {
       </Reveal>
 
       <Reveal order={1} dy={34} blur>
-        <h1 className="display text-[clamp(2.1rem,5.2vw,4.05rem)]">
+        <h1 className="display text-[clamp(1.75rem,min(5.2vw,8.6svh),4.05rem)]">
           Everything you love
           <br />
           lives under <span className="accent text-brass">one roof</span>.
@@ -149,7 +149,7 @@ function ChExterior() {
     <Layer index={3} place="mid-right" width="max-w-[min(34rem,92vw)]">
       <Marker num={c.num} label={c.label} order={0} align="right" />
       <Reveal order={1} dy={26} blur>
-        <h2 className="display text-balance text-[clamp(1.9rem,5vw,3.6rem)]">
+        <h2 className="display text-balance text-[clamp(1.6rem,min(5vw,7.6svh),3.6rem)]">
           A roof is half
           <br />
           the <span className="accent text-brass">envelope</span>.
@@ -245,7 +245,7 @@ function ChStandard() {
       <div className="flex flex-col items-center">
         <Marker num={c.num} label={c.label} order={0} />
         <Reveal order={1} dy={26} blur>
-          <h2 className="display text-balance text-[clamp(2rem,5.6vw,4.4rem)]">
+          <h2 className="display text-balance text-[clamp(1.65rem,min(5.6vw,8svh),4.4rem)]">
             Licensed. Insured. Bonded.
           </h2>
         </Reveal>
@@ -284,7 +284,7 @@ function ChCertified() {
       <div className="flex flex-col items-center">
         <Marker num={c.num} label={c.label} order={0} />
         <Reveal order={1} dy={24} blur>
-          <h2 className="display text-balance text-[clamp(1.8rem,4.8vw,3.6rem)]">
+          <h2 className="display text-balance text-[clamp(1.55rem,min(4.8vw,7.2svh),3.6rem)]">
             Manufacturer-certified installers.
           </h2>
         </Reveal>
@@ -335,7 +335,7 @@ function ChTerritory() {
         <div className="text-left">
           <Marker num={c.num} label={c.label} order={0} />
           <Reveal order={1} dy={26} blur>
-            <h2 className="display text-balance text-[clamp(1.85rem,4.4vw,3.5rem)]">
+            <h2 className="display text-balance text-[clamp(1.6rem,min(4.4vw,7.4svh),3.5rem)]">
               {site.city},
               <br />
               and the streets around it.
@@ -413,7 +413,7 @@ function ChHero() {
         </Reveal>
 
         <Reveal order={0.8} dy={30} blur>
-          <h2 className="display text-balance text-[clamp(2.4rem,7.4vw,6.2rem)]">
+          <h2 className="display text-balance text-[clamp(1.9rem,min(7.4vw,10svh),6.2rem)]">
             Let's start with
             <br />
             your <span className="accent text-brass">roof</span>.
