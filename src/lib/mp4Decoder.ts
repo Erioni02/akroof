@@ -55,6 +55,14 @@ const PHASE_PICK = 0.99
  */
 const BENCH_FRAMES = 14
 
+/** hardware must beat software by this factor to be chosen */
+const HW_MARGIN = 1.25
+
+/** rebuilds after which we stop trusting the hardware decoder */
+const REBUILDS_TO_SOFTWARE = 2
+/** rebuilds after which we stop trusting the frame bank at all */
+const REBUILDS_TO_SURRENDER = 5
+
 /** decoded frames held at once (~2.2MB each at 1600x900, ~0.9MB on mobile) */
 const MAX_FRAMES = 44
 /** how far ahead of the playhead to keep decoding */
@@ -106,6 +114,16 @@ export class FrameBank {
   private lastQueueLen = 0
   private stalledFor = 0
   private idleFor = 0
+
+  /** how many times the decoder had to be rebuilt, and what it is now */
+  private rebuilds = 0
+  private path: 'hardware' | 'software' | 'default' = 'default'
+  /** set when the decoder has failed often enough to stop trusting it */
+  exhausted = false
+
+  /** longest run of animation frames that showed the same picture */
+  private worstHold = 0
+  private holding = 0
 
   readonly width: number
   readonly height: number
@@ -258,6 +276,20 @@ export class FrameBank {
     this.painted = -1
   }
 
+  /** Live health, for the ?debug=1 readout. */
+  stats() {
+    return {
+      path: this.path,
+      rebuilds: this.rebuilds,
+      exhausted: this.exhausted,
+      cached: this.frames.size,
+      inFlight: this.queued.size,
+      pending: this.decoder ? this.decoder.decodeQueueSize : -1,
+      worstHoldFrames: this.worstHold,
+      frames: this.samples.length,
+    }
+  }
+
   /**
    * Pick the decode path by measuring it.
    *
@@ -269,27 +301,25 @@ export class FrameBank {
    * It costs a few hundred milliseconds, behind the loading screen.
    */
   private async chooseConfig(report: LoadProgress): Promise<void> {
-    const candidates: VideoDecoderConfig[] = [
-      { ...this.config, hardwareAcceleration: 'prefer-hardware' },
-      { ...this.config, hardwareAcceleration: 'prefer-software' },
-    ]
+    const hw = { ...this.config, hardwareAcceleration: 'prefer-hardware' as const }
+    const sw = { ...this.config, hardwareAcceleration: 'prefer-software' as const }
 
-    let best: VideoDecoderConfig | null = null
-    let bestMs = Infinity
+    const hwMs = await timeDecode(hw, this.samples, BENCH_FRAMES)
+    report(PHASE_PARSE + (PHASE_PICK - PHASE_PARSE) * 0.5)
+    const swMs = await timeDecode(sw, this.samples, BENCH_FRAMES)
+    report(PHASE_PICK)
 
-    for (let i = 0; i < candidates.length; i++) {
-      const ms = await timeDecode(candidates[i], this.samples, BENCH_FRAMES)
-      if (ms < bestMs) {
-        bestMs = ms
-        best = candidates[i]
-      }
-      report(
-        PHASE_PARSE +
-          ((PHASE_PICK - PHASE_PARSE) * (i + 1)) / candidates.length,
-      )
+    // Hardware has to be meaningfully faster to be worth it, not merely faster.
+    // Its failure mode is the bad one — under sustained load some drivers stall
+    // instead of slowing down — while software degrades predictably. A photo
+    // finish is not worth that risk.
+    if (hwMs < Infinity && hwMs * HW_MARGIN < swMs) {
+      this.config = hw
+      this.path = 'hardware'
+    } else if (swMs < Infinity) {
+      this.config = sw
+      this.path = 'software'
     }
-
-    if (best && bestMs < Infinity) this.config = best
     // if both failed, keep the neutral config and let prime() surface the error
   }
 
@@ -361,7 +391,18 @@ export class FrameBank {
     this.speed = this.speed * 0.7 + Math.abs(jump) * 0.3
     this.target = i
 
+    // A "hold" only counts while the playhead is moving. Standing still and
+    // showing the same picture is correct, not a stall, and counting it made
+    // the figure meaningless.
     const pick = this.bestAvailable(i)
+    if (jump === 0) {
+      this.holding = 0
+    } else if (pick === this.painted) {
+      if (++this.holding > this.worstHold) this.worstHold = this.holding
+    } else {
+      this.holding = 0
+    }
+
     if (pick >= 0 && pick !== this.painted) {
       const frame = this.frames.get(pick)
       if (frame) {
@@ -518,7 +559,15 @@ export class FrameBank {
     }
   }
 
-  /** Tear down the decoder; the next submission builds a fresh one. */
+  /**
+   * Tear down the decoder; the next submission builds a fresh one.
+   *
+   * Rebuilding is itself visible as a hitch, so repeatedly rebuilding the same
+   * misbehaving decoder trades one glitch for a rhythm of them. Each rebuild
+   * therefore escalates: first drop to software, and if even that keeps
+   * stalling, give up on the frame bank entirely. The caller then falls back
+   * to seeking the <video> element, which is coarser but cannot wedge.
+   */
   private dropDecoder(): void {
     try {
       if (this.decoder && this.decoder.state !== 'closed') this.decoder.close()
@@ -527,6 +576,16 @@ export class FrameBank {
     }
     this.decoder = null
     this.queued.clear()
+    this.rebuilds++
+
+    if (this.rebuilds >= REBUILDS_TO_SURRENDER) {
+      this.exhausted = true
+      return
+    }
+    if (this.rebuilds >= REBUILDS_TO_SOFTWARE && this.path !== 'software') {
+      this.config = { ...this.config, hardwareAcceleration: 'prefer-software' }
+      this.path = 'software'
+    }
   }
 
   /** Drop whatever is furthest from the playhead. */

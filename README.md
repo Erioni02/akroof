@@ -122,6 +122,19 @@ decodes correctly if the frames before it went through the same decoder in
 order, so cherry-picking missing frames out of a run would quietly produce
 corrupt pictures.
 
+**Recovery escalates.** Rebuilding a decoder is itself a visible hitch, so
+repeatedly rebuilding a misbehaving one trades a single glitch for a rhythm of
+them. Each rebuild therefore escalates: first drop to software, and if that
+keeps stalling, abandon the frame bank entirely and hand back to the `<video>`
+element — coarser, but it cannot wedge. Hardware also has to beat software by a
+clear margin (1.25x) to be chosen at all, because its failure mode is the bad
+one: some drivers stall under sustained load rather than simply slowing down.
+
+**Diagnostics.** Append `?debug=1` to any URL for a live readout of frame rate,
+dropped frames, which source is painting, which decoder was chosen, how many
+times it has been rebuilt, cache and queue depth, and the longest run of
+animation frames that showed the same picture while the playhead was moving.
+
 `src/components/FilmStage.tsx` is progressive enhancement on top of that. The
 `<video>` element scrubs by `currentTime` as soon as it has data, so the site is
 usable immediately; the frame bank takes over silently once ready. Any failure —

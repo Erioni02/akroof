@@ -139,12 +139,21 @@ export default function FilmStage({ children, onReady }: Props) {
 
     const renderAt = (time: number) => {
       if (bank && ctx) {
-        if (forceRedraw) {
-          forceRedraw = false
-          bank.invalidate()
+        // The decoder has failed too often to be worth another rebuild. Hand
+        // back to the <video> element: coarser frames, but it cannot wedge, and
+        // a slightly softer scrub beats a rhythm of hitches.
+        if (bank.exhausted) {
+          bank.dispose()
+          bank = null
+          setUsingCanvas(false)
+        } else {
+          if (forceRedraw) {
+            forceRedraw = false
+            bank.invalidate()
+          }
+          bank.render(ctx, time)
+          return
         }
-        bank.render(ctx, time)
-        return
       }
       // <video> fallback: don't stack seeks, and ignore sub-frame deltas
       if (video.readyState < 2) return
@@ -228,6 +237,52 @@ export default function FilmStage({ children, onReady }: Props) {
       present(p, moved)
     }
     gsap.ticker.add(tick)
+
+    if (new URLSearchParams(location.search).has('debug')) {
+      const NEWLINE = String.fromCharCode(10)
+      const el = document.createElement('div')
+      el.style.cssText =
+        'position:fixed;left:10px;bottom:10px;z-index:99999;font:11px/1.55 ui-monospace,monospace;' +
+        'color:#F3F0E9;background:rgba(6,8,11,.86);padding:9px 12px;white-space:pre;' +
+        'pointer-events:none;border:1px solid rgba(243,240,233,.18)'
+      document.body.appendChild(el)
+
+      let frames = 0
+      let slow = 0
+      let last = performance.now()
+      let fps = 0
+      let acc = 0
+
+      const probe = () => {
+        const now = performance.now()
+        const dt = now - last
+        last = now
+        frames++
+        acc += dt
+        if (dt > 34) slow++
+        if (acc >= 500) {
+          fps = Math.round((frames / acc) * 1000)
+          frames = 0
+          acc = 0
+        }
+        const st = bank ? bank.stats() : null
+        const lines = [
+          'fps          ' + fps,
+          'slow frames  ' + slow,
+          'source       ' + (bank ? 'frame bank' : 'video element'),
+        ]
+        if (st) {
+          lines.push('decoder      ' + st.path)
+          lines.push('rebuilds     ' + st.rebuilds)
+          lines.push('cached       ' + st.cached)
+          lines.push('in flight    ' + st.inFlight + ' (pending ' + st.pending + ')')
+          lines.push('worst hold   ' + st.worstHoldFrames + ' frames')
+        }
+        lines.push('progress     ' + (film.smooth * 100).toFixed(1) + '%')
+        el.textContent = lines.join(NEWLINE)
+      }
+      gsap.ticker.add(probe)
+    }
 
     if (import.meta.env.DEV) {
       // jump straight to a progress value without waiting for the damping loop
