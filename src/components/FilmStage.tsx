@@ -208,10 +208,8 @@ export default function FilmStage({ children, onReady }: Props) {
     // even when the playhead is still: that is what lets the decoder keep
     // filling in behind a scrub and land on the exact frame once you stop.
     const present = (p: number, moved: boolean) => {
-      if (moved) {
-        film.emit(p)
-        applyTreatment(p)
-      }
+      film.emit(p, moved)
+      if (moved) applyTreatment(p)
       renderAt(progressToTime(p))
     }
 

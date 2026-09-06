@@ -41,9 +41,18 @@ class FilmStore {
   /** the scroll track element, set by FilmStage */
   track: HTMLElement | null = null
 
-  emit(p: number) {
+  /**
+   * Record the playhead, and optionally tell the layers about it.
+   *
+   * `notify` exists so the caller can skip the expensive half — writing styles
+   * for eleven chapter layers — on frames where nothing moved far enough to
+   * matter. The position itself is always recorded: it feeds the damping loop,
+   * and leaving it stale made the film settle slightly short of the scroll
+   * position and stay there.
+   */
+  emit(p: number, notify = true) {
     this.smooth = p
-    for (const fn of this.listeners) fn(p)
+    if (notify) for (const fn of this.listeners) fn(p)
 
     const next = chapterAt(p)
     if (next !== this._active) {

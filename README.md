@@ -107,6 +107,16 @@ fifth of the work, and at that speed nobody can tell which of five frames they
 got. The moment the scrub settles, full runs resume and it lands on the exact
 frame.
 
+**Frames are matched to their index by timestamp, never by arrival order.**
+Positional matching — shift the next expected index off a queue as each frame
+comes back — looks equivalent and is not. A decoder under load can drop a
+frame, and one drop permanently shifts every later one: pictures get filed
+under the wrong index (a visible glitch) and the affected run can never be
+rebuilt, because it still looks in-flight (a freeze). This showed up under fast
+erratic scrolling. The in-flight set also self-heals: if the decoder reports
+nothing pending, anything still marked in-flight was dropped and is released so
+those runs can be requested again.
+
 Runs are always submitted whole and always from a keyframe: a delta frame only
 decodes correctly if the frames before it went through the same decoder in
 order, so cherry-picking missing frames out of a run would quietly produce

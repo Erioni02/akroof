@@ -29,6 +29,7 @@
 type Sample = {
   time: number
   isSync: boolean
+  timestamp: number
   chunk: EncodedVideoChunk
 }
 
@@ -79,8 +80,16 @@ export class FrameBank {
   private gopOf: Int32Array
 
   private decoder: VideoDecoder | null = null
-  /** frame indices awaiting output, in submission order */
-  private queue: number[] = []
+  /**
+   * Chunk timestamp -> frame index.
+   *
+   * Frames are matched to their index by timestamp rather than by the order
+   * they come back. Positional matching looks equivalent and is not: a decoder
+   * under load may drop a frame, and one dropped frame permanently shifts
+   * every later one, so pictures get filed under the wrong index (visible as a
+   * glitch) and the affected run can never be rebuilt (visible as a freeze).
+   */
+  private indexOfTimestamp = new Map<number, number>()
 
   private frames = new Map<number, VideoFrame>()
   /** frame indices submitted but not yet returned */
@@ -96,6 +105,7 @@ export class FrameBank {
   /** watchdog state: a decoder that stops draining gets replaced */
   private lastQueueLen = 0
   private stalledFor = 0
+  private idleFor = 0
 
   readonly width: number
   readonly height: number
@@ -113,6 +123,9 @@ export class FrameBank {
 
     this.syncOf = new Int32Array(samples.length)
     this.gopOf = new Int32Array(samples.length)
+    for (let i = 0; i < samples.length; i++) {
+      this.indexOfTimestamp.set(samples[i].timestamp, i)
+    }
 
     const syncs: number[] = []
     let key = 0
@@ -192,6 +205,7 @@ export class FrameBank {
               collected.push({
                 time: s.cts / s.timescale,
                 isSync: !!s.is_sync,
+                timestamp: Math.round((s.cts / s.timescale) * 1e6),
                 chunk: new EncodedVideoChunk({
                   type: s.is_sync ? 'key' : 'delta',
                   timestamp: Math.round((s.cts / s.timescale) * 1e6),
@@ -297,7 +311,7 @@ export class FrameBank {
 
     const dec = new VideoDecoder({
       output: (f) => {
-        const idx = this.queue.shift()
+        const idx = this.indexOfTimestamp.get(f.timestamp)
         if (idx === undefined || this.disposed) {
           f.close()
           return
@@ -309,7 +323,6 @@ export class FrameBank {
       },
       error: () => {
         this.decoder = null
-        this.queue.length = 0
         this.queued.clear()
       },
     })
@@ -421,7 +434,6 @@ export class FrameBank {
     try {
       for (let j = start; j < end; j++) {
         dec.decode(this.samples[j].chunk)
-        this.queue.push(j)
         this.queued.add(j)
       }
     } catch {
@@ -449,13 +461,24 @@ export class FrameBank {
   private pump(): void {
     if (this.disposed) return
 
+    // Nothing is pending in the decoder, so nothing marked in-flight can still
+    // be coming: whatever is left was dropped. Releasing it lets those runs be
+    // requested again instead of being skipped forever. Two consecutive idle
+    // observations, so a frame in the gap between "processed" and "delivered"
+    // is not mistaken for a loss.
+    if (this.decoder && this.decoder.decodeQueueSize === 0) {
+      if (this.queued.size > 0 && ++this.idleFor >= 2) this.queued.clear()
+    } else {
+      this.idleFor = 0
+    }
+
     // the decoder is already holding as much as it can usefully chew
-    if (this.queue.length > QUEUE_LIMIT) {
+    if (this.queued.size > QUEUE_LIMIT) {
       // ...unless it has stopped chewing. Some decoders wedge; rebuild rather
       // than wait forever on a queue that will never drain.
-      if (this.queue.length >= this.lastQueueLen) this.stalledFor++
+      if (this.queued.size >= this.lastQueueLen) this.stalledFor++
       else this.stalledFor = 0
-      this.lastQueueLen = this.queue.length
+      this.lastQueueLen = this.queued.size
 
       if (this.stalledFor > 45) {
         this.stalledFor = 0
@@ -464,7 +487,7 @@ export class FrameBank {
       return
     }
     this.stalledFor = 0
-    this.lastQueueLen = this.queue.length
+    this.lastQueueLen = this.queued.size
 
     this.trim()
 
@@ -503,7 +526,6 @@ export class FrameBank {
       /* already gone */
     }
     this.decoder = null
-    this.queue.length = 0
     this.queued.clear()
   }
 
@@ -525,7 +547,6 @@ export class FrameBank {
     this.disposed = true
     for (const f of this.frames.values()) f.close()
     this.frames.clear()
-    this.queue.length = 0
     this.dropDecoder()
     this.samples = []
   }
