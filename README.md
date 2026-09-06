@@ -25,8 +25,25 @@ in the film — the rain streaks and the roof trusses — for warping artifacts.
 
 | file                 | size     | notes                                |
 | -------------------- | -------- | ------------------------------------ |
-| `ak-film.mp4`        | 1280x720 | desktop, 60 fps, 26.8 MB             |
-| `ak-film-mobile.mp4` | 1024x576 | <= 900 px viewports, 60 fps, 16.4 MB |
+| `ak-film.mp4`        | 1280x720 | desktop, 60 fps, 33.6 MB             |
+| `ak-film-mobile.mp4` | 1024x576 | <= 900 px viewports, 60 fps, 18.3 MB |
+
+**Always encode in a single pass from `video.mp4`.** Deriving a smaller file
+from an already-encoded one compresses it twice, and that costs far more than
+the resolution change does. Measured against the original master (SSIM, mean of
+six frames across the film):
+
+| build                                  | size    | SSIM   |
+| -------------------------------------- | ------- | ------ |
+| 1280x720, derived from the 1600x900 file | 26.8 MB | 0.9262 |
+| 1280x720, single pass from the master    | 33.6 MB | 0.9446 |
+| 1440x810, single pass from the master    | 40.1 MB | 0.9529 |
+
+Two thirds of the gap between the first and last row is the double encode, not
+the resolution. The single-pass 1280x720 is what ships: it keeps the decode
+cost of the smaller frame — which is what the scrub smoothness depends on,
+since decode cost tracks pixel count and not file size — while recovering most
+of the picture.
 
 **Sizing was measured, not guessed.** Three findings decided it:
 
