@@ -155,10 +155,14 @@ export default function FilmStage({ children, onReady }: Props) {
           return
         }
       }
-      // <video> fallback: don't stack seeks, and ignore sub-frame deltas
+      // <video> fallback. Seeking a video element is genuinely expensive — the
+      // browser decodes from the nearest keyframe each time — so this path is
+      // throttled twice: never stack a seek on an unfinished one, and never ask
+      // for a position less than a 30th of a second from the last. Past that,
+      // extra seeks cost decode work for a difference nobody can see.
       if (video.readyState < 2) return
       if (video.seeking) return
-      if (Math.abs(time - lastSeek) < 1 / 90) return
+      if (Math.abs(time - lastSeek) < 1 / 30) return
       lastSeek = time
       try {
         video.currentTime = time
