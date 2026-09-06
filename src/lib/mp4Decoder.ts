@@ -63,8 +63,16 @@ const REBUILDS_TO_SOFTWARE = 2
 /** rebuilds after which we stop trusting the frame bank at all */
 const REBUILDS_TO_SURRENDER = 5
 
-/** decoded frames held at once (~2.2MB each at 1600x900, ~0.9MB on mobile) */
-const MAX_FRAMES = 44
+/**
+ * Decoded frames held at once. Each is raw NV12 in GPU memory — about 1.4MB at
+ * 1280x720, so the whole cache is ~62MB.
+ *
+ * This must stay comfortably clear of the streaming window (BEHIND + AHEAD =
+ * 34). Trimmed to 38 it thrashed: frames were evicted almost as fast as they
+ * were decoded, the in-flight queue backed up, and the watchdog started
+ * rebuilding the decoder — which is far more expensive than the memory saved.
+ */
+const MAX_FRAMES = 56
 /** how far ahead of the playhead to keep decoding */
 const AHEAD = 26
 /** how far behind to keep, so small backward moves stay instant */

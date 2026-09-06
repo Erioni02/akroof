@@ -25,8 +25,26 @@ in the film — the rain streaks and the roof trusses — for warping artifacts.
 
 | file                 | size     | notes                                |
 | -------------------- | -------- | ------------------------------------ |
-| `ak-film.mp4`        | 1600x900 | desktop, 60 fps, 42.7 MB             |
-| `ak-film-mobile.mp4` | 1024x576 | <= 900 px viewports, 60 fps, 17.2 MB |
+| `ak-film.mp4`        | 1280x720 | desktop, 60 fps, 26.8 MB             |
+| `ak-film-mobile.mp4` | 1024x576 | <= 900 px viewports, 60 fps, 16.4 MB |
+
+**Sizing was measured, not guessed.** Three findings decided it:
+
+- *Frame sequences lose.* WebP at 1280w costs ~58 KB a frame: 20.5 MB buys 360
+  frames. The video buys 1797 for 26.8 MB. Interframe compression is worth an
+  order of magnitude here, and a still sequence gives up smoothness to pay for
+  a format that removes only decoder complexity.
+- *Frame rate is nearly free; pixels are not.* Halving to 30 fps saved just
+  4.6 MB (26.8 -> 22.2) while halving smoothness, because interpolated frames
+  are highly predictable and compress to almost nothing. Dropping 1600x900 to
+  1280x720 saved 15.9 MB at identical smoothness.
+- So the lever is **resolution, never frame count**. It is also the only one
+  that improves all three goals at once: smaller download, less decode work per
+  frame, and less GPU memory for the frame cache.
+
+Going to 1600x900 at 1440px wide showed marginally crisper shingle edges under
+magnification and nothing visible at viewing size, with the grain and grade over
+it. Dropping mobile below 1024x576 saved 1.4 MB and was not worth it.
 
 Both use a 5-frame GOP and no B-frames. That costs bitrate and buys precision:
 any seek is at most five decodes, so both the WebCodecs path and the plain
