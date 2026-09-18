@@ -6,6 +6,7 @@ import { bounds, progressToTime } from '@/data/chapters'
 import { film } from '@/lib/filmStore'
 import { FrameBank, paintCover } from '@/lib/mp4Decoder'
 import { clamp, damp, easeInOutQuad, prefersReducedMotion, range } from '@/lib/motion'
+import { createSlowScroll } from '@/lib/slowScroll'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -16,12 +17,46 @@ gsap.registerPlugin(ScrollTrigger)
  * TRACK - 100svh of scrolling, so a longer track means fewer video frames per
  * wheel notch and a visibly smoother scrub.
  *
- * At 1150svh on an 810px viewport that is ~4.7px of scroll per video frame, or
+ * At 1150svh on an 810px viewport that was ~4.7px of scroll per video frame,
  * about 21 frames per wheel notch. Useful bounds: below ~2px/frame the film
  * races ahead of the scroll, and above ~6px/frame it starts to visibly step
  * between notches.
+ *
+ * ── WHY THIS IS 2800 ───────────────────────────────────────────────────────
+ * Two reasons, and the pacing one came second.
+ *
+ * It is the only effective control over scrub stutter, because it sets how many
+ * video frames a given flick demands per second. The frame bank decodes this
+ * stream at ~350 frames/sec; at 1150svh a one-second flick asked for roughly
+ * 800, so the picture froze for up to a second and then snapped. No amount of
+ * queue or cache tuning fixed that — the demand was simply above the supply.
+ * (Measured: a shallower queue, hysteresis on the fast/slow switch, capping
+ * keyframe reach and reordering eviction all made no reliable difference.)
+ *
+ * Then it was lengthened for feel, twice. At 4000svh the 30s film takes roughly
+ * 33 500px of scrolling — about 19px per video frame — so an unhurried read
+ * runs it at roughly 0.7x. Below real time the footage stops reading as
+ * playback and starts reading as a held, deliberate shot, which is the whole
+ * point of scrubbing a film rather than playing one.
+ *
+ * ── DIALLING THIS ──────────────────────────────────────────────────────────
+ * This constant IS the pacing. Measured on a 1440x860 viewport, at a calm
+ * ~800px/s scroll:
+ *
+ *     2800svh   ~25 000px   ~30s   1.0x, real time
+ *     3400svh   ~29 000px   ~36s   0.85x
+ *     4000svh   ~33 500px   ~42s   0.7x   <- here
+ *     5000svh   ~42 000px   ~52s   0.57x, very slow
+ *
+ * Raising it costs nothing in responsiveness — it only makes each pixel of
+ * scroll worth less film. The real limit is patience: everything below the
+ * film still has to be reachable.
+ *
+ * This is well past the ~6px/frame the note above warns about. That bound
+ * predates the velocity cap below; with the playhead speed-limited and damped,
+ * a wheel notch now advances ~8 frames smoothly rather than stepping.
  */
-const TRACK = 'h-[1150svh]'
+const TRACK = 'h-[4000svh]'
 
 /**
  * Cap for the fallback progress source. The video element's buffered range is
@@ -30,8 +65,61 @@ const TRACK = 'h-[1150svh]'
  */
 const DOWNLOAD_SHARE = 88
 
-const DESKTOP_SRC = '/video/ak-film.mp4'
-const MOBILE_SRC = '/video/ak-film-mobile.mp4'
+/**
+ * The film, served from Cloudinary rather than from `public/`.
+ *
+ * Two things make this faster than self-hosting, and both matter to the scrub:
+ * the file arrives from a CDN edge instead of the origin, and it is returned
+ * `immutable, max-age=30d`, so a repeat visitor pays nothing for it at all. The
+ * frame bank cannot start decoding until the whole file is down, so
+ * time-to-download IS time-to-smooth.
+ *
+ * Both URLs must keep these four properties, or the stage silently degrades:
+ *
+ *   Access-Control-Allow-Origin  the frame bank `fetch`es the bytes itself, and
+ *                                the <video> is drawn into a canvas — without
+ *                                CORS the fetch fails and the canvas taints
+ *   Content-Length (exposed)     the loading bar reports real byte progress
+ *   Accept-Ranges: bytes         the <video> fallback can seek
+ *   video/mp4, H.264 (avc1)      the decoder parses MP4 and feeds WebCodecs.
+ *                                Do NOT add `f_auto` — it may serve VP9/AV1 in
+ *                                a WebM container, which this parser cannot read
+ *
+ * MOBILE is a Cloudinary transform of the same master, not a second upload:
+ * 1280x720 @ 9.4 Mbps is 33.6 MB, which is a punishing download on a phone and
+ * more pixels than a phone can show.
+ *
+ * ── `ki_0.084` IS LOAD-BEARING. DO NOT REMOVE IT TO SAVE BYTES. ─────────────
+ * The master is encoded for scrubbing: a keyframe every 5 frames (359 of them
+ * in 1797). Nothing about a Cloudinary transform preserves that — re-encoding
+ * defaults to a keyframe roughly every 250 frames, and the derivative came back
+ * with SEVEN.
+ *
+ * That is catastrophic here rather than merely suboptimal, because the decoder
+ * submits whole GOPs: one `decodeRun` on a 250-frame GOP queues 250 decodes,
+ * four runs a tick. Measured on the 7-keyframe build, a fast flick drove the
+ * decode queue to 839 frames against a limit of 32, and the picture froze for
+ * 15-17 animation frames while the decoder chewed through work for positions
+ * the playhead had long since passed.
+ *
+ * `ki_0.084` (5 frames at 60fps) restores a 5.0-frame GOP, matching the master.
+ * It costs real bytes — dense keyframes are expensive, 7.9 MB becomes 11.1 MB —
+ * and that is simply the price of a scrubbable file. It is still a third
+ * smaller than the 18 MB mobile cut it replaced, at 720x404 instead of 720p,
+ * which is also meaningfully cheaper to decode on a phone.
+ *
+ * The first request for a derivative generates it (~9s) and every request after
+ * that is served from cache.
+ */
+const CLOUDINARY = 'https://res.cloudinary.com/jzxdwuyw/video/upload'
+const FILM = 'v1789764984/ak-film.mp4'
+
+/**
+ * Full-quality master. Swapping in `q_auto:good/` here takes it from 33.6 MB to
+ * 8.8 MB — a much faster start, at some cost in fidelity on a large display.
+ */
+const DESKTOP_SRC = `${CLOUDINARY}/${FILM}`
+const MOBILE_SRC = `${CLOUDINARY}/w_720,c_limit,q_auto:good,ki_0.084/${FILM}`
 
 /** chapters 07–09 are the graphic passage: the footage becomes light, not text */
 const ATMOS_IN = bounds[6].start
@@ -104,7 +192,14 @@ export default function FilmStage({ children, onReady }: Props) {
     const revealIfNoBank = () => {
       if (bankFailed) reveal()
     }
+    // `loadeddata` as well as `canplay`: with preload="metadata" on a slow
+    // connection the element can sit at HAVE_CURRENT_DATA for a long time and
+    // never announce `canplay`. That is already enough to scrub, so if the
+    // frame bank has failed there is no reason to hold the curtain — otherwise
+    // those visitors would wait out the full 18s safety timeout staring at a
+    // title card behind a site that was ready to use.
     video.addEventListener('canplay', revealIfNoBank)
+    video.addEventListener('loadeddata', revealIfNoBank)
 
     // never let a stalled network hold the site hostage
     const safety = window.setTimeout(reveal, 18000)
@@ -210,6 +305,11 @@ export default function FilmStage({ children, onReady }: Props) {
 
     /* ------------------------------------------------------------ scroll bind */
 
+    // The page's own speed limit. Everything downstream — the film, the chapter
+    // layers, the grade — simply follows scroll position, so capping the page
+    // paces the whole experience at once.
+    const slow = createSlowScroll()
+
     const trigger = ScrollTrigger.create({
       trigger: track,
       start: 'top top',
@@ -233,9 +333,49 @@ export default function FilmStage({ children, onReady }: Props) {
 
     let lastPresented = -1
     const tick = (_t: number, deltaMs: number) => {
+      // Advance the page first: the film reads scroll position, so doing this
+      // after would hand it last frame's position and reintroduce a one-frame
+      // lag between the page and the picture.
+      slow?.tick(deltaMs)
+
       const dt = Math.min(deltaMs, 50) / 1000
-      const k = reduced ? 1 : damp(0.26, dt)
-      const next = film.smooth + (film.raw - film.smooth) * k
+      // Damping that scales with the size of the gap.
+      //
+      // A fixed 0.26 is right for ordinary scrolling — it smooths the quantised
+      // step of a wheel notch into a continuous move. But it is a fixed
+      // FRACTION, so a big jump (End, dragging the scrollbar, a hard flick)
+      // takes just as many frames to close as a small one, and the film is still
+      // catching up when the page has already arrived. Measured on an instant
+      // jump to the bottom: the footer appeared with the film at 0.91, so the
+      // last 9% was never seen.
+      //
+      // Scaling the factor up with the gap fixes that without touching normal
+      // scrolling: below ~8% of the film nothing changes, and beyond it the
+      // playhead closes hard enough to arrive with the page.
+      const gap = Math.abs(film.raw - film.smooth)
+      const factor = 0.26 + 0.54 * Math.min(1, gap / 0.08)
+      const k = reduced ? 1 : damp(factor, dt)
+
+      // The playhead follows scroll 1:1, damped but NOT speed-limited.
+      //
+      // An earlier version capped how fast the film could travel. It felt
+      // wonderful on a hard flick — the footage slowed to a crawl instead of
+      // lurching — but capping the film while the PAGE kept moving at full speed
+      // decoupled the two, and that produced two bugs that were really one bug:
+      //
+      //   · the page reached the end of the track, the sticky stage unpinned and
+      //     the footer arrived while the film was still mid-way, so the rest of
+      //     the film was simply skipped
+      //   · the film went on travelling after the gesture stopped, because it
+      //     was still working through a backlog the scrollbar had already spent
+      //
+      // Both are impossible while the film is tied to scroll position: reaching
+      // the footer now REQUIRES having scrolled through the whole film, and a
+      // playhead that only moves when scroll moves cannot run on. The slow,
+      // cinematic feel comes from TRACK length instead, which buys the same
+      // thing without ever letting the two drift apart.
+      const next = reduced ? film.raw : film.smooth + (film.raw - film.smooth) * k
+
       const settled = Math.abs(film.raw - next) < 0.00002
       const p = settled ? film.raw : next
 
@@ -345,12 +485,14 @@ export default function FilmStage({ children, onReady }: Props) {
       ro.disconnect()
       clearTimeout(safety)
       gsap.ticker.remove(tick)
+      slow?.destroy()
       trigger.kill()
       window.removeEventListener('resize', onResize)
       window.removeEventListener('orientationchange', onResize)
       video.removeEventListener('progress', onProgress)
       video.removeEventListener('loadeddata', onProgress)
       video.removeEventListener('canplay', revealIfNoBank)
+      video.removeEventListener('loadeddata', revealIfNoBank)
       video.removeEventListener('seeked', onSeeked)
       bank?.dispose()
       film.track = null
@@ -374,9 +516,24 @@ export default function FilmStage({ children, onReady }: Props) {
             ref={videoRef}
             className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
             style={{ opacity: usingCanvas ? 0 : 1 }}
+            // Required now the film is cross-origin. `paintCover` draws this
+            // element into the canvas to cover the handover to the frame bank,
+            // and without an anonymous CORS request that draw taints the canvas
+            // and throws a SecurityError — which would break the very fallback
+            // that exists to keep the site usable when the decoder fails.
+            crossOrigin="anonymous"
             muted
             playsInline
-            preload="auto"
+            // `metadata`, NOT `auto`. The frame bank fetches this same file in
+            // full, and a media element's cache is separate from the fetch
+            // cache in Chrome — so `auto` downloaded all 33.6 MB twice, 67 MB
+            // total, with the two transfers competing for bandwidth. Since the
+            // scrub only becomes smooth once the bank has the whole file, that
+            // eager preload was directly delaying the thing it was meant to
+            // cover for. With `metadata` the element pulls only enough to be
+            // seekable and then range-requests as it goes, which is all the
+            // stopgap path ever needed.
+            preload="metadata"
             controls={false}
             disablePictureInPicture
             tabIndex={-1}

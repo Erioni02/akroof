@@ -164,6 +164,23 @@ export class FrameBank {
       this.gopOf[i] = Math.max(0, syncs.length - 1)
     }
     this.syncList = Int32Array.from(syncs.length ? syncs : [0])
+
+    // Runs are submitted whole, so GOP length is the unit of work this decoder
+    // commits to in one go. This master is authored for scrubbing at ~5 frames
+    // per GOP; a file encoded with ordinary defaults lands nearer 250, and then
+    // a single `decodeRun` queues 250 decodes and a fast scrub buries the
+    // decoder. It still renders, which is exactly why it is worth shouting
+    // about: the only symptom is that the film stutters, with no error anywhere.
+    if (import.meta.env.DEV) {
+      const gop = samples.length / Math.max(1, this.syncList.length)
+      if (gop > 20) {
+        console.warn(
+          `[FrameBank] sparse keyframes: ${this.syncList.length} in ${samples.length} frames ` +
+            `(~${gop.toFixed(0)}/GOP). Not encoded for scrubbing; expect stutter under fast ` +
+            `scroll. Re-encode with a short keyframe interval (ffmpeg -g 5, Cloudinary ki_0.084).`,
+        )
+      }
+    }
   }
 
   static supported(): boolean {

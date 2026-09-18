@@ -15,6 +15,12 @@
       content="AK Roofing & Gutters. Roofing, gutters, soffit & fascia, siding, skylights and windows for Oakbrook Terrace, Illinois and the surrounding area. Licensed, insured, bonded, BBB A+ rated."
     />
 
+    <!-- The film is the critical asset: the scrub cannot become smooth until
+         the whole file is down, so the DNS + TLS handshake to the CDN is worth
+         paying for up front rather than at first paint. `crossorigin` is
+         required for it to be reused by the frame bank's CORS fetch. -->
+    <link rel="preconnect" href="https://res.cloudinary.com" crossorigin />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
